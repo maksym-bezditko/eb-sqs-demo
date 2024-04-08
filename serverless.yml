@@ -1,0 +1,44 @@
+service: eb-sqs-demo
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: dev
+  region: eu-north-1
+
+package:
+  individually: true
+
+custom:
+  apiGatewayServiceProxies:
+    - eventbridge:
+        path: /eventbridge
+        method: post
+        detailType: "user-signup"
+        source: "fuel-app"
+        eventBusName: !Ref EventBus
+        cors: true
+  prune:
+    automatic: true
+    number: 1
+
+functions:
+  processEventLambda:
+    handler: functions/processEvent.handler
+    events:
+      - sqs:
+          arn: !GetAtt TargetSQS.Arn
+          batchSize: 10
+          functionResponseType: ReportBatchItemFailures
+          # maximumBatchingWindow: 10
+
+plugins:
+  - serverless-esbuild
+  - serverless-apigateway-service-proxy
+  - serverless-prune-plugin
+resources:
+  Resources: ${file(resources.yml)}
+  Outputs:
+    EventBusName:
+      Value: !Ref EventBus

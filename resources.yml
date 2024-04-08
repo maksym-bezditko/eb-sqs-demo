@@ -1,0 +1,48 @@
+# create EventBridge EventBus
+
+EventBus:
+  Type: AWS::Events::EventBus
+  Properties:
+    Name: QR_EVENT_BUS
+
+TargetSQS:
+  Type: AWS::SQS::Queue
+  Properties:
+    QueueName: QR_MESSAGE_QUEUE
+    RedrivePolicy:
+      deadLetterTargetArn: !GetAtt TargetDLQ.Arn
+      maxReceiveCount: 3
+
+TargetDLQ:
+  Type: AWS::SQS::Queue
+  Properties:
+    QueueName: QR_MESSAGE_DLQ
+
+TargetSQSPolicy:
+  Type: AWS::SQS::QueuePolicy
+  Properties:
+    PolicyDocument:
+      Statement:
+        - Action:
+            - "SQS:SendMessage"
+            - "SQS:ReceiveMessage"
+          Effect: "Allow"
+          Resource: !GetAtt TargetSQS.Arn
+          Principal:
+            Service:
+            - "events.amazonaws.com"
+    Queues:
+      - !Ref TargetSQS
+
+TargetSQSRule:
+  Type: AWS::Events::Rule
+  Properties:
+    EventBusName: !GetAtt EventBus.Arn
+    Targets:
+      - Arn: !GetAtt TargetSQS.Arn
+        Id: qr-event-bus-target-sqs-${sls:stage}
+    EventPattern:
+      source:
+        - "fuel-app"
+      detail-type:
+        - "user-signup"
