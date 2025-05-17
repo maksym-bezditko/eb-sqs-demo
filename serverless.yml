@@ -4,8 +4,34 @@ frameworkVersion: "3"
 provider:
   name: aws
   runtime: nodejs18.x
-  stage: dev
-  region: eu-north-1
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'eu-north-1'}
+  memorySize: 256
+  timeout: 30
+  logRetentionInDays: 14
+  
+  # Define default tags for all resources
+  tags:
+    Environment: ${self:provider.stage}
+    Service: ${self:service}
+    Managed: serverless
+  
+  # Define IAM role statements for the Lambda function
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource: !GetAtt TargetSQS.Arn
+        - Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          Resource: "arn:aws:logs:*:*:*"
 
 package:
   individually: true
@@ -22,23 +48,53 @@ custom:
   prune:
     automatic: true
     number: 1
+  esbuild:
+    bundle: true
+    minify: true
+    sourcemap: true
+    exclude: ['aws-sdk']
+    target: 'node18'
+    platform: 'node'
+    define:
+      'process.env.NODE_ENV': "'${self:provider.stage}'"
 
 functions:
   processEventLambda:
     handler: functions/processEvent.handler
+    description: Process events from SQS queue
     events:
       - sqs:
           arn: !GetAtt TargetSQS.Arn
           batchSize: 10
           functionResponseType: ReportBatchItemFailures
+          # Uncomment to add batching window if needed
           # maximumBatchingWindow: 10
+    # Function specific tags
+    tags:
+      Function: processEventLambda
 
 plugins:
   - serverless-esbuild
   - serverless-apigateway-service-proxy
   - serverless-prune-plugin
+
 resources:
   Resources: ${file(resources.yml)}
   Outputs:
     EventBusName:
       Value: !Ref EventBus
+    ApiGatewayUrl:
+      Description: "URL of the API Gateway endpoint"
+      Value: 
+        Fn::Join:
+          - ""
+          - - "https://"
+            - Ref: ApiGatewayRestApi
+            - ".execute-api."
+            - Ref: AWS::Region
+            - ".amazonaws.com/"
+            - ${self:provider.stage}
+            - "/eventbridge"
+    QueueUrl:
+      Description: "URL of the SQS Queue"
+      Value: !Ref TargetSQS
