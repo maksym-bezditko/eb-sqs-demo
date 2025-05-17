@@ -1,48 +1,93 @@
-# create EventBridge EventBus
-
+# Event Bus Definition
 EventBus:
   Type: AWS::Events::EventBus
   Properties:
-    Name: QR_EVENT_BUS
+    Name: QR_EVENT_BUS_${self:provider.stage}
+    Tags:
+      - Key: Environment
+        Value: ${self:provider.stage}
+      - Key: Service
+        Value: ${self:service}
+      - Key: Managed
+        Value: serverless
 
+# Main Queue Definition
 TargetSQS:
   Type: AWS::SQS::Queue
   Properties:
-    QueueName: QR_MESSAGE_QUEUE
+    QueueName: QR_MESSAGE_QUEUE_${self:provider.stage}
+    # Configure visibility timeout to match lambda execution
+    VisibilityTimeout: 120
+    # Configure message retention (14 days)
+    MessageRetentionPeriod: 1209600
+    # Configure DLQ redrive policy
     RedrivePolicy:
       deadLetterTargetArn: !GetAtt TargetDLQ.Arn
       maxReceiveCount: 3
+    Tags:
+      - Key: Environment
+        Value: ${self:provider.stage}
+      - Key: Service
+        Value: ${self:service}
+      - Key: Managed
+        Value: serverless
 
+# Dead Letter Queue Definition
 TargetDLQ:
   Type: AWS::SQS::Queue
   Properties:
-    QueueName: QR_MESSAGE_DLQ
+    QueueName: QR_MESSAGE_DLQ_${self:provider.stage}
+    # Configure longer retention for DLQ (14 days)
+    MessageRetentionPeriod: 1209600
+    Tags:
+      - Key: Environment
+        Value: ${self:provider.stage}
+      - Key: Service
+        Value: ${self:service}
+      - Key: Managed
+        Value: serverless
 
+# Queue Permission Policy
 TargetSQSPolicy:
   Type: AWS::SQS::QueuePolicy
   Properties:
     PolicyDocument:
+      Version: "2012-10-17"
       Statement:
-        - Action:
-            - "SQS:SendMessage"
-            - "SQS:ReceiveMessage"
+        - Sid: "AllowEventBridgeToSendMessages"
           Effect: "Allow"
-          Resource: !GetAtt TargetSQS.Arn
           Principal:
             Service:
-            - "events.amazonaws.com"
+              - "events.amazonaws.com"
+          Action:
+            - "SQS:SendMessage"
+            - "SQS:ReceiveMessage"
+          Resource: !GetAtt TargetSQS.Arn
+          Condition:
+            ArnEquals:
+              "aws:SourceArn": !GetAtt EventBus.Arn
     Queues:
       - !Ref TargetSQS
 
+# Event Rule to route events to SQS
 TargetSQSRule:
   Type: AWS::Events::Rule
   Properties:
+    Name: QR_EVENT_TO_SQS_RULE_${self:provider.stage}
+    Description: "Rule to send user-signup events to the target SQS queue"
     EventBusName: !GetAtt EventBus.Arn
-    Targets:
-      - Arn: !GetAtt TargetSQS.Arn
-        Id: qr-event-bus-target-sqs-${sls:stage}
     EventPattern:
       source:
         - "fuel-app"
       detail-type:
         - "user-signup"
+    Targets:
+      - Arn: !GetAtt TargetSQS.Arn
+        Id: qr-event-bus-target-sqs-${self:provider.stage}
+    Tags:
+      - Key: Environment
+        Value: ${self:provider.stage}
+      - Key: Service
+        Value: ${self:service}
+      - Key: Managed
+        Value: serverless
